@@ -157,14 +157,6 @@ func (it *Item) collect(w *world.World, collector Collector, pos mgl64.Vec3) {
 	_ = it.Close()
 }
 
-// New creates and returns an Item with the item.Stack, position, and velocity provided. It doesn't spawn the Item
-// by itself.
-func (it *Item) New(stack item.Stack, pos, vel mgl64.Vec3) world.Entity {
-	itemEntity := NewItem(stack, pos)
-	itemEntity.vel = vel
-	return itemEntity
-}
-
 // Explode ...
 func (it *Item) Explode(mgl64.Vec3, float64, block.ExplosionConfig) {
 	_ = it.Close()
@@ -185,7 +177,8 @@ type Collector interface {
 // ItemType is a world.EntityType implementation for Item.
 type ItemType struct{}
 
-func (ItemType) EncodeEntity() string { return "minecraft:item" }
+func (ItemType) EncodeEntity() string   { return "minecraft:item" }
+func (ItemType) NetworkOffset() float64 { return 0.125 }
 func (ItemType) BBox(world.Entity) cube.BBox {
 	return cube.Box(-0.125, 0, -0.125, 0.125, 0.25, 0.125)
 }

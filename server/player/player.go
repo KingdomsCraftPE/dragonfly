@@ -192,6 +192,33 @@ func (p *Player) XUID() string {
 	return p.xuid
 }
 
+// DeviceID returns the device ID of the player. If the Player is not connected to a network session, an empty string is
+// returned. Otherwise, the device ID the network session sent in the ClientData is returned.
+func (p *Player) DeviceID() string {
+	if p.session() == session.Nop {
+		return ""
+	}
+	return p.session().ClientData().DeviceID
+}
+
+// DeviceModel returns the device model of the player. If the Player is not connected to a network session, an empty
+// string is returned. Otherwise, the device model the network session sent in the ClientData is returned.
+func (p *Player) DeviceModel() string {
+	if p.session() == session.Nop {
+		return ""
+	}
+	return p.session().ClientData().DeviceModel
+}
+
+// SelfSignedID returns the self-signed ID of the player. If the Player is not connected to a network session, an empty
+// string is returned. Otherwise, the self-signed ID the network session sent in the ClientData is returned.
+func (p *Player) SelfSignedID() string {
+	if p.session() == session.Nop {
+		return ""
+	}
+	return p.session().ClientData().SelfSignedID
+}
+
 // Addr returns the net.Addr of the Player. If the Player is not connected to a network session, nil is returned.
 func (p *Player) Addr() net.Addr {
 	if p.session() == session.Nop {
@@ -820,7 +847,7 @@ func (p *Player) Exhaust(points float64) {
 		p.hunger.SetFood(before)
 
 		ctx := event.C()
-		if p.Handler().HandleFoodLoss(ctx, before, after); ctx.Cancelled() {
+		if p.Handler().HandleFoodLoss(ctx, before, &after); ctx.Cancelled() {
 			return
 		}
 		p.hunger.SetFood(after)
@@ -1223,6 +1250,9 @@ func (p *Player) EnderChestInventory() *inventory.Inventory {
 func (p *Player) SetGameMode(mode world.GameMode) {
 	previous := p.gameMode.Swap(mode)
 	p.session().SendGameMode(mode)
+	for _, v := range p.viewers() {
+		v.ViewEntityGameMode(p)
+	}
 
 	if !mode.AllowsFlying() {
 		p.StopFlying()
@@ -1802,8 +1832,13 @@ func (p *Player) BreakBlock(pos cube.Pos) {
 	held, _ := p.HeldItems()
 	drops := p.drops(held, b)
 
+	xp := 0
+	if breakable, ok := b.(block.Breakable); ok && !p.GameMode().CreativeInventory() {
+		xp = breakable.BreakInfo().XPDrops.RandomValue()
+	}
+
 	ctx := event.C()
-	if p.Handler().HandleBlockBreak(ctx, pos, &drops); ctx.Cancelled() {
+	if p.Handler().HandleBlockBreak(ctx, pos, &drops, &xp); ctx.Cancelled() {
 		p.resendBlocks(pos, w)
 		return
 	}
@@ -1818,12 +1853,9 @@ func (p *Player) BreakBlock(pos cube.Pos) {
 		if info.BreakHandler != nil {
 			info.BreakHandler(pos, w, p)
 		}
-		if diff := (info.XPDrops[1] - info.XPDrops[0]) + 1; diff > 0 && !p.GameMode().CreativeInventory() {
-			amount := rand.Intn(diff) + info.XPDrops[0]
-			for _, orb := range entity.NewExperienceOrbs(pos.Vec3Centre(), amount) {
-				orb.SetVelocity(mgl64.Vec3{(rand.Float64()*0.2 - 0.1) * 2, rand.Float64() * 0.4, (rand.Float64()*0.2 - 0.1) * 2})
-				w.AddEntity(orb)
-			}
+		for _, orb := range entity.NewExperienceOrbs(pos.Vec3Centre(), xp) {
+			orb.SetVelocity(mgl64.Vec3{(rand.Float64()*0.2 - 0.1) * 2, rand.Float64() * 0.4, (rand.Float64()*0.2 - 0.1) * 2})
+			w.AddEntity(orb)
 		}
 	}
 	for _, drop := range drops {
@@ -1854,7 +1886,7 @@ func (p *Player) drops(held item.Stack, b world.Block) []item.Stack {
 		drops = container.Inventory().Items()
 		if breakable, ok := b.(block.Breakable); ok && !p.GameMode().CreativeInventory() {
 			if breakable.BreakInfo().Harvestable(t) {
-				drops = breakable.BreakInfo().Drops(t, held.Enchantments())
+				drops = append(drops, breakable.BreakInfo().Drops(t, held.Enchantments())...)
 			}
 		}
 		container.Inventory().Clear()
